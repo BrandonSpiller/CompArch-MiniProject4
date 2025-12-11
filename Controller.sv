@@ -1,34 +1,38 @@
 module Controller(
-    input clk
+    input logic clk,
     //Instruction relevant variables
     input logic [31:0] instr,
     output logic [31:0] ImmExt, //extended immediate
     output logic [6:0] opcode,
+    input logic reset,
 
     //Main Decoder Relevant Variables
-    output loigc [1:0] ResultSrc,
+    output logic [1:0] ResultSrc,
     output logic MemWrite,
-    output logic RegWrite,
     output logic ALUsrc,
     output logic RegWrite,
     output logic Branch,
     output logic Jump,
-    output logic PCWrite,
-    output logic AdrSrc,
-    output logic IRWrite,
 
     //ALU Decoder Relevant Variables
-    output logic [2:0] ALUcontrol,
-    output logic [1:0] ALUOp,
+    output logic [3:0] ALUControl,
 
     //Instructions Relevant to FSM
-    input logic WriteData,
-    input logic Address1,
+    output logic AdrSrc,
+    output logic PCWrite,
+    output logic IRWrite,
+
+    output logic [1:0] SrcA,
+    output logic [1:0] SrcB,
+    output logic [1:0] ResultSrc_fsm,
+    output logic RegWrite_fsm,
+    output logic MemWrite_fsm,
+    output logic Branch_fsm
 );
 
     //Instruction relevant Variables
-    loigc [6:0] funct7;
-    loigc [2:0] funct3;
+    logic [6:0] funct7;
+    logic [2:0] funct3;
     logic [31:0] Imm; //immediate from instruction
     logic [4:0] rs1;
     logic [4:0] rs2;
@@ -37,29 +41,36 @@ module Controller(
     //Main Decoder Relevant Variables
     logic [2:0] ImmSrc; //control signal for sign extender/Instruction Decoder
 
-    //FSM Relevant Variables
-    logic state;
-    logic next_state;
-    logic current_state;
-
+    //ALU Decoder Relevant Variables
+    logic [1:0] ALUOp;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     // BEGINNING OF INSTRUCTION DECODER + SIGN EXTENDOR                 BEGINNING OF INSTRUCTION DECODER + SIGN EXTENDOR
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    always_ff @(posedge clk) begin //maybe add some sort of trigger ontop of clk for when there is a new instruction
-        ImmExt <= 32'd0;
-        Imm <= 32'd0;
-        funct7 <= 7'd0;
-        funct3 <= 3'd0;
-        rs1 <= 5'd0;
-        rs2 <= 5'd0;
-        rd <= 5'd0;
+    initial
+        begin //maybe add some sort of trigger ontop of clk for when there is a new instruction @(posedge clk) 
+        ImmExt = 32'd0;
+        Imm = 32'd0;
+        funct7 = 7'd0;
+        funct3 = 3'd0;
+        rs1 = 5'd0;
+        rs2 = 5'd0;
+        rd = 5'd0;
         opcode = instr[6:0];
     end
 
     always_comb
         begin
+            //Default assignments to prevent latches
+            rs1 = 5'd0;
+            rs2 = 5'd0;
+            rd = 5'd0;
+            funct7 = 7'd0;
+            funct3 = 3'd0;
+            Imm = 32'd0;
+            ImmExt = 32'd0;
+
             case (opcode)
                 7'b0110011: begin //R-type
                     rs1 = instr[19:15];
@@ -117,9 +128,9 @@ module Controller(
                     rs2 = instr[24:20];
                     funct3 = instr[14:12];
                 
-                    Imm[11:5] = Instr[31:25];
-                    Imm[4:0] = Instr[11:7];
-                    Imm_Ext = {{20{Imm[11]}}, Imm[11:0]};
+                    Imm[11:5] = instr[31:25];
+                    Imm[4:0] = instr[11:7];
+                    ImmExt = {{20{Imm[11]}}, Imm[11:0]};
                 end
 
                 7'b1100011: begin //B-type (Branches)
@@ -127,25 +138,25 @@ module Controller(
                     rs2 = instr[24:20];
                     funct3 = instr[14:12];
 
-                    Imm[12] = Instr[31];
-                    Imm[10:5] = Instr[30:25];
-                    Imm[4:1] = Instr[11:8];
-                    Imm[11] = Instr[7];
-                    Imm_Ext = {{19{Imm[12]}}, Imm[12:1], 1'b0};
+                    Imm[12] = instr[31];
+                    Imm[10:5] = instr[30:25];
+                    Imm[4:1] = instr[11:8];
+                    Imm[11] = instr[7];
+                    ImmExt = {{19{Imm[12]}}, Imm[12:1], 1'b0};
                 end
 
                 7'b0110111: begin //U-type (LUI)
                     rd = instr[11:7];
 
-                    Imm = Instr[31:12];
-                    Imm_Ext = {Imm[31:12], 12'b0}
+                    Imm = instr[31:12];
+                    ImmExt = {Imm[19:0], 12'b0}; //ImmExt = {Imm[31:12], 12'b0}
                 end
 
                 7'b0010111: begin //U-type (AUIPC)
                     rd = instr[11:7];
 
-                    Imm = Instr[31:12];
-                    Imm_Ext = {Imm[31:12], 12'b0}
+                    Imm = instr[31:12];
+                    ImmExt = {Imm[19:0], 12'b0}; //ImmExt = {Imm[31:12], 12'b0}
                 end
 
                 7'b1101111: begin //J-type (JAL)
@@ -155,17 +166,17 @@ module Controller(
                     Imm[10:1] = instr[30:21];
                     Imm[11] = instr[20];
                     Imm[19:12] = instr[19:12];
-                    Imm_Ext = {{11{Imm[20]}}, Imm[20:1], 1'b0};
+                    ImmExt = {{11{Imm[20]}}, Imm[20:1], 1'b0};
                 end
 
                 default: begin
-                    ImmExt <= 32'd0;
-                    Imm <= 32'd0;
-                    funct7 <= 7'd0;
-                    funct3 <= 3'd0;
-                    rs1 <= 5'd0;
-                    rs2 <= 5'd0;
-                    rd <= 5'd0;
+                    ImmExt = 32'd0;
+                    Imm = 32'd0;
+                    funct7 = 7'd0;
+                    funct3 = 3'd0;
+                    rs1 = 5'd0;
+                    rs2 = 5'd0;
+                    rd = 5'd0;
                 end
             endcase
         end
@@ -175,48 +186,62 @@ module Controller(
     //////////////////////////////////////////////////////////////////////////
 
     //should be a giant opcode case statement that does different things based on the opcode
-    always_comb begin
+    initial
+        begin
         //set everything to 0 by default
-        RegWrite <= 1'b0;
-        MemWrite <= 1'b0;
-        ALUSrc <= 1'b0;
-        ResultSrc <= 2'b00;
-        Branch <= 1'b0;
-        Jump <= 1'b0;
-        ALUOp <= 2'b00;
+        RegWrite = 1'b0;
+        MemWrite = 1'b0;
+        ALUsrc = 1'b0;
+        ResultSrc = 2'b00;
+        Branch = 1'b0;
+        Jump = 1'b0;
+        ALUOp = 2'b00;
+        end
+    
+    always_comb
+        begin
+            
+            //Default Values
+            RegWrite = 1'b0;
+            MemWrite = 1'b0;
+            ALUsrc = 1'b0;
+            ResultSrc = 2'b00;
+            Branch = 1'b0;
+            Jump = 1'b0;
+            ALUOp = 2'b00;
 
         case(opcode)
             7'b0110011: begin //R-type Instructions(ADD, SUB, AND, OR, SLL, SLT, SLTU, XOR, SRL, SRA)
                 RegWrite = 1'b1;
-                ALUSrc = 1'b0;      //rs2
+                ALUsrc = 1'b0;      //rs2
                 ResultSrc = 2'b00;  //Write ALU result
-                ALUOp = 2'b10;      //R-type ALU operation
+                //ALUOp = 2'b10;      //R-type ALU operation
             end
             
             7'b0010011: begin //I-type ALU Instructions (ADDI, SLTI, SLTIU, XORI, ORI, ANDI, SLLI, SRLI, SRAI)
                 RegWrite = 1'b1;
-                ALUSrc = 1'b1;      //immediate
+                ALUsrc = 1'b1;      //immediate
                 ResultSrc = 2'b00;  //Write ALU result
-                ALUOp = 2'b10;      //I-type ALU operation
+                //ALUOp = 2'b10;      //I-type ALU operation
             end
             
             7'b0000011: begin //I-type Load Instructions(LW, LH, LB, LBU, LHU)
                 RegWrite = 1'b1;
-                ALUSrc = 1'b1;      //immediate
+                ALUsrc = 1'b1;      //immediate
                 ResultSrc = 2'b01;  //Write memory data
-                ALUOp = 2'b00;      //Add for address calculation
+                //ALUOp = 2'b00;      //Add for address calculation
             end
             
             7'b0100011: begin //S-type Instructions (Store) (SW, SH, SB)
                 MemWrite = 1'b1;
-                ALUSrc = 1'b1;      //immediate
-                ALUOp = 2'b00;      //Add for address calculation
+                ALUsrc = 1'b1;      //immediate
+                //ALUOp = 2'b00;      //Add for address calculation
             end
             
             7'b1100011: begin //B-type Instructions (Branch) (BEQ, BNE, BLT, BGE, BLTU, BGEU)
                 Branch = 1'b1;
-                ALUSrc = 1'b0;      //Compare rs1 and rs2
-                ALUOp = 2'b01;      //Branch comparison
+                ALUsrc = 1'b0;      //Compare rs1 and rs2
+                //ALUOp = 2'b01;      //Branch comparison
             end
             
             7'b1101111: begin //JAL
@@ -228,26 +253,26 @@ module Controller(
             7'b1100111: begin //JALR
                 RegWrite = 1'b1;
                 Jump = 1'b1;
-                ALUSrc = 1'b1; //Use immediate
+                ALUsrc = 1'b1; //Use immediate
                 ResultSrc = 2'b10; //Write PC+4
-                ALUOp = 2'b00; //Add for target address
+                //ALUOp = 2'b00; //Add for target address
             end
             
             7'b0110111: begin //LUI
                 RegWrite = 1'b1;
-                ALUSrc = 1'b1;
+                ALUsrc = 1'b1;
                 ResultSrc = 2'b11; //Write immediate directly
             end
             
             7'b0010111: begin // AUIPC
                 RegWrite = 1'b1;
-                ALUSrc = 1'b1;
+                ALUsrc = 1'b1;
                 ResultSrc = 2'b00; // Write ALU result
-                ALUOp = 2'b00; // Add
+                //ALUOp = 2'b00; // Add
             end
             
             default: begin
-                // All signals remain at default (0)!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                //For some reason the default needs to be set at the order to not get latch error
             end
         endcase
     end
@@ -257,96 +282,100 @@ module Controller(
     //////////////////////////////////////////////////////////////////////////
 
     // ALU Decoder outputs ALUControl based on ALUOp, funct3, and sometimes funct7
-always_comb begin
-    case(ALUOp)
-        2'b00: begin 
-            ALUControl = 4'b0000; // ADD 
-        end
-        
-        2'b01: begin // Branch operations
-            case(funct3)
-                3'b000: begin
-                    ALUControl = 4'b0001; // BEQ (subtract)
-                end
+    always_comb 
+    begin
+        //default value to prevent latch
+        ALUControl = 4'b0000;
 
-                3'b001: begin 
-                    ALUControl = 4'b0001; // BNE (subtract)
-                end
-
-                3'b100: begin
-                    ALUControl = 4'b1000; // BLT (set less than)
-                end
-
-                3'b101: begin 
-                    ALUControl = 4'b1000; // BGE (set less than)
-                end
-
-                3'b110: begin 
-                    ALUControl = 4'b1001; // BLTU (set less than unsigned)
-                end
-
-                3'b111: begin ALUControl = 4'b1001; // BGEU (set less than unsigned)
-                end 
+        case(ALUOp)
+            2'b00: begin 
+                ALUControl = 4'b0000; // ADD 
+            end
             
-                default: begin
-                    ALUControl = 4'b0000;
-                end
+            2'b01: begin // Branch operations, What the freak even are these branch operations
+                case(funct3)
+                    3'b000: begin
+                        ALUControl = 4'b0001; // BEQ (subtract)
+                    end
 
-            endcase
-        end
-        
-        2'b10: begin // R-type and I-type ALU operations
-            case(funct3)
-                3'b000: begin
-                    if (opcode == 7'b0110011 && funct7[5]) // SUB
-                        ALUControl = 4'b0001;
-                    else // ADD or ADDI
+                    3'b001: begin 
+                        ALUControl = 4'b0001; // BNE (subtract)
+                    end
+
+                    3'b100: begin
+                        ALUControl = 4'b1000; // BLT (set less than)
+                    end
+
+                    3'b101: begin 
+                        ALUControl = 4'b1000; // BGE (set less than)
+                    end
+
+                    3'b110: begin 
+                        ALUControl = 4'b1001; // BLTU (set less than unsigned)
+                    end
+
+                    3'b111: begin ALUControl = 4'b1001; // BGEU (set less than unsigned)
+                    end 
+                
+                    default: begin
                         ALUControl = 4'b0000;
-                end
-                3'b001: begin 
-                    ALUControl = 4'b0101; // SLL or SLLI
-                end
+                    end
 
-                3'b010: begin 
-                    ALUControl = 4'b1000; // SLT or SLTI
-                end
+                endcase
+            end
+            
+            2'b10: begin // R-type and I-type ALU operations
+                case(funct3)
+                    3'b000: begin
+                        if (opcode == 7'b0110011 && funct7[5]) // SUB
+                            ALUControl = 4'b0001;
+                        else // ADD or ADDI
+                            ALUControl = 4'b0000;
+                    end
+                    3'b001: begin 
+                        ALUControl = 4'b0101; // SLL or SLLI
+                    end
 
-                3'b011: begin
-                    ALUControl = 4'b1001; // SLTU or SLTIU
-                end
+                    3'b010: begin 
+                        ALUControl = 4'b1000; // SLT or SLTI
+                    end
 
-                3'b100: begin 
-                    ALUControl = 4'b0100; // XOR or XORI
-                end 
+                    3'b011: begin
+                        ALUControl = 4'b1001; // SLTU or SLTIU
+                    end
 
-                3'b101: begin
-                    if (funct7[5]) // SRA or SRAI
-                        ALUControl = 4'b0111;
-                    else // SRL or SRLI
-                        ALUControl = 4'b0110;
-                end
+                    3'b100: begin 
+                        ALUControl = 4'b0100; // XOR or XORI
+                    end 
 
-                3'b110: begin
-                    ALUControl = 4'b0011; // OR or ORI
-                end
+                    3'b101: begin
+                        if (funct7[5]) // SRA or SRAI
+                            ALUControl = 4'b0111;
+                        else // SRL or SRLI
+                            ALUControl = 4'b0110;
+                    end
 
-                3'b111: begin 
-                    ALUControl = 4'b0010; // AND or ANDI
-                end
+                    3'b110: begin
+                        ALUControl = 4'b0011; // OR or ORI
+                    end
 
-                default: begin 
-                    ALUControl = 4'b0000;
-                end
+                    3'b111: begin 
+                        ALUControl = 4'b0010; // AND or ANDI
+                    end
 
-            endcase
-        end
-        
-        default: begin 
-            ALUControl = 4'b0000;
-        end
+                    default: begin 
+                        ALUControl = 4'b0000;
+                    end
 
-    endcase
-end
+                endcase
+            end
+            
+            default: begin 
+                ALUControl = 4'b0000;
+            end
+
+        endcase
+    end
 
     //////////////////////////////////////////////////////////////////////////
     // BEGINNING OF MAIN FSM          BEGINNING OF MAIN FSM
@@ -364,8 +393,7 @@ end
         ALUWb = 4'b0111, //S7
         ExecuteI = 4'b1000, //S8
         jal = 4'b1001, //S9
-        beq = 4'b1010, //S10
-
+        beq = 4'b1010 //S10
     } state_t;
 
     state_t current_state, next_state;
@@ -382,15 +410,15 @@ end
     always_comb begin
         AdrSrc = 0;
         IRWrite = 0;
-        RegWrite = 0;
-        SrcA = 0;
+        RegWrite_fsm = 0;
+        SrcA = 2'b00;
         SrcB = 2'b00;
-        ResultSrc = 2'b00;
-        MemWrite = 0;
+        ResultSrc_fsm = 2'b00; //changed
+        MemWrite_fsm = 0;
         PCWrite = 0;
-        Branch = 0;
+        Branch_fsm = 0;
         ALUOp = 2'b00;
-
+        next_state = Fetch;
 
         case (current_state)
             Fetch: begin
@@ -404,7 +432,7 @@ end
                 SrcB = 2'b10; //4
                 ALUOp = 2'b00; //Add
                 PCWrite = 1;
-                ResultSrc = 2'b10; //ALUResult to PC
+                ResultSrc_fsm = 2'b10; //ALUResult to PC
                 
             end 
 
@@ -441,7 +469,7 @@ end
                 endcase 
 
                 //Action
-                SrcA = 0; //PC
+                SrcA = 2'b00; //PC
                 SrcB = 2'b01; //ImmExt
                 ALUOp = 2'b00; // Add (for branch target calculation) 
             end
@@ -451,12 +479,12 @@ end
                 if (opcode == 7'b0000011)// Load
                     next_state = MemRead;
                 else if (opcode == 7'b0100011) // Store
-                    next_state = MemWrite;
+                    next_state = MemWrite_state;
                 else
                     next_state = Fetch;
                 
                 //Action
-                SrcA = 1; //Register data
+                SrcA = 2'b01; //Register data
                 SrcB = 2'b01; //ImmExt
                 ALUOp = 2'b00; //Add
             end
@@ -465,27 +493,27 @@ end
                 next_state = MemWB;
 
                 AdrSrc = 1; //Use ALUResult as memory address
-                ResultSrc = 2'b00; //Memory data
+                ResultSrc_fsm = 2'b01; //Memory data
             end 
 
             MemWB: begin 
                 next_state = Fetch;
 
-                ResultSrc = 2'b00; //Memory data
-                RegWrite = 1; //Write to register
+                ResultSrc_fsm = 2'b01; //Memory data. 01 is memory data
+                RegWrite_fsm = 1; //Write to register
             end 
 
-            MemWrite: begin 
+            MemWrite_state: begin 
                 next_state = Fetch;
 
-                AdrSrc = 1; //Use ALUResult as memory address
-                MemWrite_sig = 1; //Enable memory write
+                AdrSrc = 1;
+                MemWrite_fsm = 1; //Enable memory write
             end 
 
             ExecuteR: begin
                 next_state = ALUWb;
 
-                SrcA = 1; //Register rs1
+                SrcA = 2'b01; //Register rs1
                 SrcB = 2'b00; //Register rs2
                 ALUOp = 2'b10; //R-type operation (determined by funct3/funct7)
             end 
@@ -493,32 +521,32 @@ end
             ExecuteI: begin 
                 next_state = ALUWb;
 
-                SrcA = 1; // Register rs1
-                SrcB = 2'b01; // ImmExt
-                ALUOp = 2'b10; // I-type operation (determined by funct3)
+                SrcA = 2'b01; //Register rs1
+                SrcB = 2'b01; //ImmExt
+                ALUOp = 2'b10; //I-type operation (determined by funct3)
             end 
 
             ALUWb: begin
                 next_state = Fetch;
 
-                ResultSrc = 2'b00;// ALUResult
-                RegWrite = 1; //Write to register
+                ResultSrc_fsm = 2'b00; //ALUResult
+                RegWrite_fsm = 1; //Write to register
             end 
 
             jal: begin
                 next_state = Fetch;
 
-                ResultSrc = 2'b00;// PC+4 (saved in ALUOut from Decode)
-                RegWrite = 1; //Write return address to rd
+                ResultSrc_fsm = 2'b10; //PC+4 (saved in ALUOut from Decode)
+                RegWrite_fsm = 1; //Write return address to rd
                 PCWrite = 1; //Update PC to jump target
             end
 
             beq: begin
                 next_state = Fetch;
 
-                Branch = 1; // Enable branch logic
-                SrcA = 1; // Register rs1
-                SrcB = 2'b00;//Register rs2
+                Branch_fsm = 1; //Enable branch logic
+                SrcA = 2'b01; //Register rs1
+                SrcB = 2'b00; //Register rs2
                 ALUOp = 2'b01; //Subtract (for comparison)
             end
 
@@ -527,8 +555,5 @@ end
             end
         endcase
     end
-
-    // Output logic
-    assign state = current_state;
 
 endmodule

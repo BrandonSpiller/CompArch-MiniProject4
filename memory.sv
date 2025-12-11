@@ -24,7 +24,7 @@
 // can be accessed through the data memory ports.
 
 module memory #(
-    parameter IMEM_INIT_FILE_PREFIX = "", 
+    parameter IMEM_INIT_FILE_PREFIX = "IMEM_", 
     parameter DMEM_INIT_FILE_PREFIX = "", 
     parameter CLK_FREQ = 12000000
 )(
@@ -36,7 +36,6 @@ module memory #(
     input logic     [31:0] imem_address, 
     output logic    [31:0] imem_data_out, 
     output logic    [31:0] dmem_data_out, 
-    output logic    reset, 
     output logic    led,                    // Active-high PWM output for user LED
     output logic    red,                    // Active-high PWM output for red LED
     output logic    green,                  // Active-high PWM output for green LED
@@ -421,7 +420,7 @@ module memory #(
         end
     end
 
-    assign reset = 1'b1;
+    //assign reset = 1'b1;
 
 endmodule
 

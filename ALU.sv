@@ -61,7 +61,6 @@ module ALU(
                 zero = 0;
                 ALUresult = 32'd0;
             end
-            
        endcase
 
        zero = (ALUresult == 32'd0);
